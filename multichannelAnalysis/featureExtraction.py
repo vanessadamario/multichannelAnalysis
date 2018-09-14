@@ -34,7 +34,7 @@ def bandfilter(X, fs, centralf, band, order=2, filtertype='butter', filteraction
     b, a = iirfilter(order, [low, high], btype=filteraction,
                      analog=False, ftype=filtertype)  # iir filter
 
-    return lfilter(b, a, data, axis=1)
+    return lfilter(b, a, X, axis=1)
 
 # notch
 def remove_powerline(X, fs, powerline=50., bandstopwidth=2., filterorder=2):
@@ -53,13 +53,11 @@ def remove_powerline(X, fs, powerline=50., bandstopwidth=2., filterorder=2):
         Filtered signal
     """
     nyq = fs / 2.  # nyquist frequency
-    harmonics = np.linspace(powerline, nyq, nyq / powerline)
+    harmonics = np.linspace(powerline, nyq - powerline, nyq / powerline - 1)  # not over nyq
     filtertype = 'butter'
     filteraction = 'bandstop'
-
     for f in harmonics:
-        X = bandfilter(X, fs, bandstopwidth, f)
-
+        X = bandfilter(X, fs, f, bandstopwidth)
     return X
 
 
@@ -75,7 +73,7 @@ class featureExtractionTimeSeries():
     (iii) Shannon entropy
     (iv) time over a threshold
     """
-    def __init__(self, X, fs, rmpowerline=True, powerline=50):
+    def __init__(self, X, fs, rmpowerline=True, powerline=50.):
         """
         Class initializer
         -------------
@@ -114,7 +112,7 @@ class featureExtractionTimeSeries():
         skewness = ((self.X - self.X.mean(axis=1).reshape(-1, 1))**3).mean(axis=1) / (self.X.std(axis=1)**3)
         kurtosis = ((self.X - self.X.mean(axis=1).reshape(-1, 1))**4).mean(axis=1) / (self.X.std(axis=1)**4)
 
-        moments = np.hstack((moments, self.X.mean(axis=1).reshape(self.n, 1)))
+        # moments = np.hstack((moments, self.X.mean(axis=1).reshape(self.n, 1)))
         moments = np.hstack((moments, self.X.std(axis=1).reshape(self.n, 1)))
         moments = np.hstack((moments, skewness.reshape(self.n, 1)))
         moments = np.hstack((moments, kurtosis.reshape(self.n, 1)))
@@ -137,7 +135,8 @@ class featureExtractionTimeSeries():
             a number of features related to the number of bands
         """
         absXfft = np.abs(np.fft.fft(self.X, axis=1))[:, 0:self.p//2]
-        freqs = np.fft.fftfreq(self.p, 1 / self.fs * self.p)[0:self.p//2]
+        freqs = np.fft.fftfreq(self.p, (1. / self.fs))[0:self.p//2]  # [0, Nyq]
+
         # cumulative sum over all bands
         cumulative = np.cumsum(absXfft, axis=1)
 
@@ -185,7 +184,7 @@ class featureExtractionTimeSeries():
 
         for i in range(self.n):
             scaledecomp = pywt.wavedec(self.X[i], 'db2')  # coefficients from wd
-            energyperscale = np.array(map(lambda x: np.sum(self.X)**2, scaledecomp[1:]))
+            energyperscale = np.array(map(lambda x: np.sum(x)**2, scaledecomp[1:]))
             totalenergy = np.sum(energyperscale)   # total energy
             waveletEntropy = - np.sum(energyperscale/totalenergy *
                                 np.log(energyperscale/totalenergy))
@@ -246,3 +245,41 @@ class featureExtractionTimeSeries():
                 valueoverthresh = np.hstack((valueoverthresh, tmptime.reshape(self.n, 1)))
 
         return valueoverthresh
+
+
+
+def split_folderstring(folderpath, x):
+    """
+    This function is specific for the format of our data, as the spatial features
+    are placed in folders
+    """
+    folder = re.match(folderpath, x, flags=re.IGNORECASE).group(0)
+    range_ = re.split(folder, x, flags=re.IGNORECASE)
+    start, _ = range_[1].split('.pkl')
+
+    return start
+
+
+def merge_temporal_features(X, fs, powerline, thresholds):
+    """
+    Here we call the class which performs the preprocessing step + feature
+    extraction step from the time series. In particular we compute the
+    fft features, dwt, moments and thresholds over the time series
+    -------------
+    Parameters
+        X, data matrix of dimensions #recordings x length time series
+        fs, sampling frequency
+        powerline, powerline value
+        thresholds, the value of the thresholds related to the ones in neurobands
+    -------------
+    Returns
+        features, the set of features used in classification
+    """
+    FE = featureExtractionTimeSeries(X, fs, powerline)
+
+    fft = FE.computefftfeat()  # fft features
+    dwt = FE.computedwtfeat()  # dwt - shannon measure
+    mom = FE.computemoments()  # moments of the distribution
+    tem = FE.computetimefeat(thresholds)  # time spent over adaptive thresholds
+
+    return np.hstack((fft, dwt, mom, tem))
