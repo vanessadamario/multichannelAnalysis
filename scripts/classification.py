@@ -25,7 +25,7 @@ def main():
     path = "/home/vanessa/DATA_SEEG/PKL_FILE/"
     filepath = "/home/vanessa/DATA_SEEG/PKL_FILE/classificationset.pkl"
 
-    df = pd.read_pickle(filepath)
+    df = pd.read_pickle(filepath)  # dataframe which contains the features
 
     # first we consider for each patient the position of the epileptic channels
     position_focus = np.zeros((len(df.index.levels[0]), 6))  # mean and std
@@ -74,8 +74,15 @@ def main():
     # total number of channels
     n, _  = df.shape
 
+    learning_indexes = []
+    test_indexes = []
+    predictions = []
+
     # we split in training and learning sets
     for idx_ln, idx_ts in sss_ln_ts.split(df.iloc[:, :-4], df["Y"]):
+
+        learning_indexes.append(idx_ln)
+        test_indexes.append(idx_ts)
 
         # we must consider the indeces. This is done in such a way that we can
         # recover the center - focus for each patient
@@ -90,6 +97,7 @@ def main():
         estimator.fit(X_ln[idx_ln], y_ln[idx_ln])
 
         y_pred = estimator.predict(X_ts)
+        predictions.append(y_pred)
 
         ####################### assess position ###############################
 
@@ -149,7 +157,9 @@ def main():
     np.save("fn_distance.npy", fn_distance_results)
     np.save("fp_distance.npy", fp_distance_results)
 
-    # pkl.dump(estimator_list, open("estimators.pkl", 'wb'))
+    pkl.dump(learning_indexes, open("learning_indexes.pkl", 'wb'))
+    pkl.dump(test_indexes, open("testing_indexes.pkl", 'wb'))
+    pkl.dump(predictions, open("predictions.pkl", 'wb'))
 
 
 if __name__ == '__main__':
