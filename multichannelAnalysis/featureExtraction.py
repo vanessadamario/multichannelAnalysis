@@ -239,8 +239,7 @@ class featureExtractionTimeSeries():
 
             for c in constants:
 
-                # stdrec <- thresh
-                tmptime = ((np.abs(tmpfilter[:, edge:-edge]) > c * stdrec[j]).sum(axis=1)
+                tmptime = ((np.abs(tmpfilter[:, edge:-edge]) > c * thresh[j]).sum(axis=1)
                                     / (self.p -2. * edge))
                 valueoverthresh = np.hstack((valueoverthresh, tmptime.reshape(self.n, 1)))
 

@@ -1,3 +1,4 @@
+import pickle
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import cross_validate
@@ -23,42 +24,18 @@ def main():
     """
 
     path = "/home/vanessa/DATA_SEEG/PKL_FILE/"
-    filepath = "/home/vanessa/DATA_SEEG/PKL_FILE/classificationset.pkl"
+    focus_pos_path = "/home/vanessa/DATA_SEEG/PKL_FILE/focus_position.pkl"
+    class_set_path = "/home/vanessa/DATA_SEEG/PKL_FILE/finalclassificationset.pkl"
 
-    df = pd.read_pickle(filepath)  # dataframe which contains the features
-
-    # first we consider for each patient the position of the epileptic channels
-    position_focus = np.zeros((len(df.index.levels[0]), 6))  # mean and std
-
-    for nn, idx in enumerate(df.index.levels[0]):  # loop over the ID for the patient
-
-        bm = df.loc[idx]["Y"]       # we consider the labels
-        bm = bm[:len(bm)/2]         # we have the split (2 times # channels)
-        bm = np.where(bm == 1)[0]   # boolean mask for epileptic channels
-
-        xf = df.loc[idx]['xcoor'][bm]
-        yf = df.loc[idx]['ycoor'][bm]
-        zf = df.loc[idx]['zcoor'][bm]
-
-        focus_position[nn] = np.array([np.mean(xf), np.std(xf), np.mean(yf),
-                                       np.std(yf), np.mean(zf), np.std(zf)])
-
-    print(focus_position)
-
-    dffocus = pd.DataFrame(data=focus_position, index=df.index.levels[0], columns=[
-                        "meanx", "stdx", "meany", "stdy", "meanz", "stdz"])
-
-    dffocus.to_pickle(path + "focus_position.pkl")
-
-
-    ############################# CLASSIFICATION ###############################
+    dffocus = pd.read_pickle(focus_pos_path)
+    df = pd.read_pickle(class_set_path)  # dataframe which contains the features
 
     # random forest estimator
     RF = RandomForestClassifier(n_estimators=1000)
     param_grid = {'max_features': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]}
 
     # 50 splits
-    splits = 50
+    splits = 1
     confusion_m_results = []
     fn_distance_results = []
     fp_distance_results = []
@@ -79,7 +56,12 @@ def main():
     predictions = []
 
     # we split in training and learning sets
-    for idx_ln, idx_ts in sss_ln_ts.split(df.iloc[:, :-4], df["Y"]):
+    X  = df.iloc[:, :-4].values
+    y = df["Y"].values
+
+    print(X.shape, y.shape)
+
+    for idx_ln, idx_ts in sss_ln_ts.split(X, y):
 
         learning_indexes.append(idx_ln)
         test_indexes.append(idx_ts)
@@ -94,14 +76,14 @@ def main():
 
         estimator = GridSearchCV(RF, param_grid=param_grid,
                                  cv=3, scoring='f1', n_jobs=-1)
-        estimator.fit(X_ln[idx_ln], y_ln[idx_ln])
+        estimator.fit(X_ln, y_ln)
 
         y_pred = estimator.predict(X_ts)
         predictions.append(y_pred)
 
         ####################### assess position ###############################
 
-        pred_error = idx_ts[y_pred != y_ts]  # test indeces of wrong prediction
+        pred_error = idx_ts[y_pred != y_ts]  # test indexes of wrong prediction
 
         fp_distance = []  # distance from focus
         fn_distance = []
@@ -110,20 +92,17 @@ def main():
 
         for idx_error in pred_error:
 
-            xx = df.loc[idx_error]["xcoor"]    # x coordinate for the channel
-            yy = df.loc[idx_error]["ycoor"]    # y coordinate for the channel
-            zz = df.loc[idx_error]["zcoor"]    # z coordinate for the channel
+            xx = df.iloc[idx_error]["xcoor"]    # x coordinate for the channel
+            yy = df.iloc[idx_error]["ycoor"]    # y coordinate for the channel
+            zz = df.iloc[idx_error]["zcoor"]    # z coordinate for the channel
             id_p = df.index[idx_error][0]      # identifier for patient
 
             # standardized distance from the focus
-            stardard_distx = (xx - dffocus.loc[id_p]["xmean"]) /
-                                    dffocus.loc[id_p]["xstd"]
-            standard_disty = (yy - dffocus.loc[id_p]["ymean"]) /
-                                    dffocus.loc[id_p]["ystd"]
-            standard_distz = (zz - dffocus.loc[id_p]["zmean"]) /
-                                    dffocus.loc[id_p]["zstd"]
+            stardard_distx = np.abs(xx - dffocus.loc[id_p]["meanx"]) / dffocus.loc[id_p]["stdx"]
+            standard_disty = np.abs(yy - dffocus.loc[id_p]["meany"]) / dffocus.loc[id_p]["stdy"]
+            standard_distz = np.abs(zz - dffocus.loc[id_p]["meanz"]) / dffocus.loc[id_p]["stdz"]
 
-            if(y_ts[idx_error] == 1):   # false negative
+            if(y[idx_error] == 1):   # false negative
                 fn_distance.append([stardard_distx,
                                     standard_disty, standard_distz])
                 fn_idx.append(idx_error)
@@ -150,16 +129,21 @@ def main():
         count = count + 1
 
     confusion_m_results = np.array(confusion_m_results)
-    fn_distance_results = np.array(fn_distance_results)
-    fp_distance_results = np.array(fp_distance_results)
 
-    np.save("confusion_matrix.npy", confusion_m_results)
-    np.save("fn_distance.npy", fn_distance_results)
-    np.save("fp_distance.npy", fp_distance_results)
+    np.save(path + "_results/confusion_matrix.npy", confusion_m_results)
+    pickle.dump(fn_distance_results,
+            open(path + "_results/fn_distance.pkl", 'wb'))
+    pickle.dump(fp_distance_results,
+            open(path + "_results/fp_distance.pkl", 'wb'))
 
-    pkl.dump(learning_indexes, open("learning_indexes.pkl", 'wb'))
-    pkl.dump(test_indexes, open("testing_indexes.pkl", 'wb'))
-    pkl.dump(predictions, open("predictions.pkl", 'wb'))
+
+
+    pickle.dump(learning_indexes,
+            open(path + "_results/learning_indexes.pkl", 'wb'))
+    pickle.dump(test_indexes,
+            open(path + "_results/testing_indexes.pkl", 'wb'))
+    pickle.dump(predictions,
+            open(path + "_results/predictions.pkl", 'wb'))
 
 
 if __name__ == '__main__':
